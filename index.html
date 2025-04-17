@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Net Zero Dashboard</title>
+  <style>
+   /* General body styling */
+body {
+  font-family: Arial, sans-serif;
+  padding: 20px;
+  background: #f4f4f4;
+}
+
+/* Heading styling */
+h2 {
+  text-align: center;
+  color: #333;
+}
+
+/* Scrollable table container */
+.scrollable-table {
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid #ccc;
+  margin-bottom: 20px;
+}
+
+/* Table layout */
+table {
+  border-collapse: collapse;
+  min-width: 100%;
+  width: max-content;
+}
+
+/* Table cells */
+th,
+td {
+  border: 1px solid #ccc;
+  padding: 8px;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* Table header styling */
+th {
+  background-color: #004d7a;
+  color: white;
+  position: sticky;
+  top: 0;
+}
+
+/* Input row inputs */
+.input-row input {
+  width: 150px;
+  padding: 5px;
+}
+
+/* Button styling */
+.btn {
+  padding: 10px 15px;
+  background: #007bff;
+  color: white;
+  border: none;
+  margin: 5px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* Chart canvas */
+canvas {
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px;
+  display: block;
+  margin: auto;
+  max-width: 60%;
+  width: 60%;
+  height: 600px; 
+}
+
+/* Controls and filters */
+.chart-controls,
+.date-filter,
+.toggle-buttons {
+  text-align: center;
+  margin: 20px 0;
+}
+
+.chart-controls select,
+.date-filter input {
+  padding: 5px;
+  font-size: 16px;
+  margin: 5px;
+}
+
+/* Row selection styling */
+tr.selected {
+  background-color: #d0ebff;
+}
+
+/* Hidden elements */
+.hidden {
+  display: none;
+}
+
+  </style>
+</head>
+<body>
+
+  <h2>Net Zero CO2 Tracker</h2>
+
+  <div class="toggle-buttons">
+    <button class="btn" onclick="toggleElement('chartSection')">Toggle Chart</button>
+    <button class="btn" onclick="toggleElement('submittedSection')">Toggle Table</button>
+  </div>
+
+  <div id="chartSection">
+    <canvas id="myChart" height="100"></canvas>
+    <div class="chart-controls">
+      <label>Chart Type: 
+        <select id="chartType" onchange="drawChart()">
+          <option value="line">Line</option>
+          <option value="bar">Bar</option>
+          <option value="radar">Radar</option>
+          <option value="pie">Pie</option>
+        </select>
+      </label>
+      <label>
+        <input type="radio" name="viewMode" value="column" checked onchange="drawChart()"> Column-wise
+      </label>
+      <label>
+        <input type="radio" name="viewMode" value="row" onchange="drawChart()"> Row-wise
+      </label>
+    </div>
+  </div>
+
+
+  <div class="date-filter">
+    <label>From Date: <input type="date" id="fromDate"></label>
+    <label>To Date: <input type="date" id="toDate"></label>
+    <button class="btn" onclick="applyDateFilter()">Apply Filter</button>
+
+    <!-- Filter by Daily, Monthly, Yearly -->
+    <button class="btn" onclick="setTimePeriod('daily')">Daily</button>
+    <button class="btn" onclick="setTimePeriod('monthly')">Monthly</button>
+    <button class="btn" onclick="setTimePeriod('yearly')">Yearly</button>
+  </div>
+
+  <div class="scrollable-table">
+    <table id="dataTable">
+      <thead><tr id="headerRow"></tr></thead>
+      <tbody>
+        <tr class="input-row" id="inputRow"></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="text-align:center;">
+    <button class="btn" onclick="submitData()">Data Submit</button>
+  </div>
+
+  <div id="submittedSection">
+    <h3 style="text-align:center;">Submitted Data</h3>
+    <div class="scrollable-table">
+      <table id="submittedDataTable">
+        <thead><tr id="submittedHeaderRow"></tr></thead>
+        <tbody id="submittedDataBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const columns = [
+      "Meter_reading_period_FROM", "Total_electricity_usage_kWh", "Propane_gas_LP_m3",
+      "City_gas_m3", "Regular_gasoline_l", "Kerosene_l", "Diesel_l", "Water_supply_m3",
+      "Kyushu_Energy_Co_Ltd", "Propane_gas_LP", "City_gas", "Regular_gasoline",
+      "kerosene", "Light_oil", "Water_Supply", "Electricity_consumption_kg_CO2",
+      "Propane_gas_kg_CO2", "City_gas_kg_CO2", "Regular_gasoline_kg_CO2",
+      "Kerosene_kg_CO2", "Diesel_kg_CO2", "Water_kg_CO2", "Total_kg_CO2",
+      "Solar_power_sales_kWh", "kg_CO2_reduction", "Net_CO2_emissions_kg"
+    ];
+
+    let myChart = null;
+    let selectedTimePeriod = 'daily';
+    let selectedOperation = 'sum';  // Default operation is sum
+
+    window.onload = function () {
+      const header = document.getElementById("headerRow");
+      const inputRow = document.getElementById("inputRow");
+      const submittedHeader = document.getElementById("submittedHeaderRow");
+
+      columns.forEach((col, index) => {
+        header.innerHTML += `<th>${col}</th>`;
+        if (index === 0) {
+          inputRow.innerHTML += `<td><input type="date" name="${col}"></td>`;
+        } else {
+          inputRow.innerHTML += `<td><input type="text" name="${col}" placeholder="${col}"></td>`;
+        }
+        submittedHeader.innerHTML += `<th>${col}</th>`;
+      });
+    };
+
+    function submitData() {
+      const inputs = document.querySelectorAll("#inputRow input");
+      const submittedBody = document.getElementById("submittedDataBody");
+
+      let tr = document.createElement("tr");
+
+      inputs.forEach((input, i) => {
+        let td = document.createElement("td");
+        td.textContent = input.value.trim() === "" ? "0" : input.value.trim();
+        tr.appendChild(td);
+        input.value = "";
+      });
+
+      tr.onclick = function () {
+        this.classList.toggle("selected");
+        drawChart();
+      };
+
+      submittedBody.appendChild(tr);
+    }
+
+    function getFilteredRows() {
+      const from = document.getElementById("fromDate").value;
+      const to = document.getElementById("toDate").value;
+      const allRows = Array.from(document.querySelectorAll("#submittedDataBody tr"));
+      const selected = allRows.filter(row => row.classList.contains("selected"));
+
+      return selected.filter(row => {
+        const date = row.children[0].textContent;
+        if (!date) return false;
+        const rowDate = new Date(date);
+        if (from && rowDate < new Date(from)) return false;
+        if (to && rowDate > new Date(to)) return false;
+        return true;
+      });
+    }
+
+    function setTimePeriod(period) {
+      selectedTimePeriod = period;
+      applyDateFilter();
+    }
+
+    function applyDateFilter() {
+      drawChart();
+    }
+
+    function drawChart() {
+      const rows = getFilteredRows();
+      if (rows.length === 0) return;
+
+      const chartType = document.getElementById("chartType").value;
+      const viewMode = document.querySelector('input[name="viewMode"]:checked').value;
+
+      let labels = [];
+      let datasets = [];
+
+      if (viewMode === "column") {
+        labels = rows.map(row => row.children[0].textContent);
+
+        columns.forEach((col, i) => {
+          if (i === 0) return;
+          const data = rows.map(row => {
+            let value = parseFloat(row.children[i].textContent) || 0;
+            if (selectedTimePeriod === 'monthly') {
+              value = value; 
+            } else if (selectedTimePeriod === 'yearly') {
+              value = value;
+            }
+            return value;
+          });
+
+          if (selectedOperation === 'sum') {
+            const sum = data.reduce((acc, val) => acc + val, 0);
+            datasets.push({
+              label: col,
+              data: Array(rows.length).fill(sum),
+              borderWidth: 2,
+              fill: chartType !== "line"
+            });
+          } else if (selectedOperation === 'max') {
+            const max = Math.max(...data);
+            datasets.push({
+              label: col,
+              data: Array(rows.length).fill(max),
+              borderWidth: 2,
+              fill: chartType !== "line"
+            });
+          } else if (selectedOperation === 'min') {
+            const min = Math.min(...data);
+            datasets.push({
+              label: col,
+              data: Array(rows.length).fill(min),
+              borderWidth: 2,
+              fill: chartType !== "line"
+            });
+          } else if (selectedOperation === 'average') {
+            const avg = data.reduce((acc, val) => acc + val, 0) / data.length;
+            datasets.push({
+              label: col,
+              data: Array(rows.length).fill(avg),
+              borderWidth: 2,
+              fill: chartType !== "line"
+            });
+          }
+        });
+      }
+
+      if (myChart) myChart.destroy();
+
+      myChart = new Chart(document.getElementById("myChart"), {
+        type: chartType,
+        data: {
+          labels,
+          datasets
+        },
+        options: {
+          responsive: true,
+          scales: chartType === "pie" ? {} : {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    function toggleElement(id) {
+      const el = document.getElementById(id);
+      el.classList.toggle("hidden");
+    }
+  </script>
+</body>
+</html>
